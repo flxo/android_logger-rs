@@ -131,7 +131,7 @@ impl Log for AndroidLogger {
 
         // If no tag was specified, use module name
         let custom_tag = self.tag.read().expect("failed to acquire android_log tag lock for read");
-        let tag = custom_tag.as_ref().map(|s| s.as_bytes()).unwrap_or(module_path.as_bytes());
+        let tag = custom_tag.as_ref().map(std::ffi::CString::as_bytes).unwrap_or_else(|| module_path.as_bytes());
 
         // truncate the tag here to fit into LOGGING_TAG_MAX_LEN
         self.fill_tag_bytes(&mut tag_bytes, tag);
@@ -215,8 +215,8 @@ impl Filter {
     /// let filter = Filter::default().with_allowed_module_path("crate");
     ///
     /// assert!(filter.is_module_path_allowed("crate"));
+    /// assert!(filter.is_module_path_allowed("crate::subcrate"));
     /// assert!(!filter.is_module_path_allowed("other_crate"));
-    /// assert!(!filter.is_module_path_allowed("crate::subcrate"));
     /// ```
     ///
     /// ## Multiple rules example:
@@ -230,8 +230,8 @@ impl Filter {
     ///
     /// assert!(filter.is_module_path_allowed("A"));
     /// assert!(filter.is_module_path_allowed("B"));
+    /// assert!(filter.is_module_path_allowed("A::B"));
     /// assert!(!filter.is_module_path_allowed("C"));
-    /// assert!(!filter.is_module_path_allowed("A::B"));
     /// ```
     pub fn with_allowed_module_path<S: Into<String>>(mut self, path: S) -> Self {
         self.allow_module_paths.push(path.into());
@@ -253,7 +253,7 @@ impl Filter {
     /// assert!(filter.is_module_path_allowed("A"));
     /// assert!(filter.is_module_path_allowed("B"));
     /// assert!(!filter.is_module_path_allowed("C"));
-    /// assert!(!filter.is_module_path_allowed("A::B"));
+    /// assert!(filter.is_module_path_allowed("A::B"));
     /// ```
     pub fn with_allowed_module_paths<I: IntoIterator<Item = String>>(mut self, paths: I) -> Self {
         self.allow_module_paths.extend(paths.into_iter());
@@ -268,7 +268,7 @@ impl Filter {
 
         self.allow_module_paths
             .iter()
-            .any(|allowed_path| allowed_path == path)
+            .any(|allowed_path| path.starts_with(allowed_path))
     }
 }
 
@@ -304,7 +304,7 @@ impl<'a> PlatformLogWriter<'a> {
             },
             len: 0,
             last_newline_index: 0,
-            tag: tag,
+            tag,
             buffer: unsafe { mem::uninitialized() },
         }
     }
@@ -315,7 +315,7 @@ impl<'a> PlatformLogWriter<'a> {
             priority: level,
             len: 0,
             last_newline_index: 0,
-            tag: tag,
+            tag,
             buffer: unsafe { mem::uninitialized() },
         }
     }
@@ -375,7 +375,7 @@ impl<'a> PlatformLogWriter<'a> {
 
     /// Copy `len` bytes from `index` position to starting position.
     fn copy_bytes_to_start(&mut self, index: usize, len: usize) {
-        let src = unsafe { self.buffer.as_ptr().offset(index as isize) };
+        let src = unsafe { self.buffer.as_ptr().add(index) };
         let dst = self.buffer.as_mut_ptr();
         unsafe { ptr::copy(src, dst, len) };
     }
